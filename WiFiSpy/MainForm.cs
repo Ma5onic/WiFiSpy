@@ -454,13 +454,19 @@ namespace WiFiSpy
             }
         }
 
+        Stopwatch sw = Stopwatch.StartNew();
         private void AirservClient_onPacketArrival(PacketDotNet.Packet packet, DateTime ArrivalTime)
         {
             this.LiveCaptureFile.ProcessPacket(packet, ArrivalTime);
             captureInfo.AddCapturefile(this.LiveCaptureFile);
             this.LiveCaptureFile.Clear();
 
-            this.Invoke(new Invoky(() => RefreshAll()));
+            if (sw.ElapsedMilliseconds >= 1000)
+            {
+                this.Invoke(new Invoky(() => RefreshAll()));
+                sw.Reset();
+                sw.Start();
+            }
         }
 
         private void APTree_AfterSelect(object sender, TreeViewEventArgs e)

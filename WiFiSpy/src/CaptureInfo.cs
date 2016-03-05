@@ -183,6 +183,7 @@ namespace WiFiSpy.src
                     StationList.Add(MacSourceAddrNumber, station);
             }
 
+            Stopwatch sw = Stopwatch.StartNew();
             for (int i = 0; i < _dataFrames.Count; i++)
             {
                 Station station = null;
@@ -194,8 +195,11 @@ namespace WiFiSpy.src
                     i--;
                     DataFrameProgressValue++;
 
-                    if (onDataFrameProgress != null)
+                    if (onDataFrameProgress != null && sw.ElapsedMilliseconds >= 1000)
+                    {
                         onDataFrameProgress(DataFrameProgressValue, DataFrameCount);
+                        sw = Stopwatch.StartNew();
+                    }
                 }
             }
         }
