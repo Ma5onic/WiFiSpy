@@ -16,6 +16,8 @@ namespace WiFiSpy.src.Packets
         public byte[] MacAddress { get; private set; }
         public int Channel { get; private set; }
         public DateTime TimeStamp { get; private set; }
+        public int Wifi_Channel { get; private set; }
+        public int FrameSize { get; private set; }
 
         public string MacAddressStr
         {
@@ -35,10 +37,18 @@ namespace WiFiSpy.src.Packets
         }
 
         public BeaconFrame(PacketDotNet.Ieee80211.BeaconFrame frame, DateTime TimeStamp)
+            : this(frame, TimeStamp, 0)
+        {
+
+        }
+
+        public BeaconFrame(PacketDotNet.Ieee80211.BeaconFrame frame, DateTime TimeStamp, int Channel)
         {
             this.Manufacturer = OuiParser.GetOuiByMac(frame.SourceAddress.GetAddressBytes());
             this.MacAddress = frame.SourceAddress.GetAddressBytes();
             this.TimeStamp = TimeStamp;
+            this.Wifi_Channel = Channel;
+            this.FrameSize = frame.FrameSize;
 
             foreach (InformationElement element in frame.InformationElements)
             {

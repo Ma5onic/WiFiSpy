@@ -145,6 +145,8 @@ namespace WiFiSpy
             FillExtenderList();
 
             FillApTree();
+
+            FillWiFiAnalyzerTrafficChart();
         }
 
         private void FillApTree()
@@ -158,7 +160,7 @@ namespace WiFiSpy
         private void FillExtenderList()
         {
             LvRepeaterNames.Items.Clear();
-            LvRepeaterList.Items.Clear();
+            //LvRepeaterList.Items.Clear();
 
             SortedList<string, AccessPoint[]> repeaters = captureInfo.PossibleExtenders;
 
@@ -398,6 +400,58 @@ namespace WiFiSpy
             TrafficPieChart.Series.Add(APSerie_Pie);
         }
 
+        private void FillWiFiAnalyzerTrafficChart()
+        {
+            WiFiAnalyzerChart.Titles.Clear();
+            WiFiAnalyzerChart.Series.Clear();
+
+            WiFiAnalyzerChart.Titles.Add("WiFi Analyzer Traffic Chart");
+
+            Series TrafficSerie = WiFiAnalyzerChart.Series.Add("Packets /sec");
+            TrafficSerie.LegendText = "Packets /sec";
+            //TrafficSerie.ChartType = SeriesChartType.SplineArea;
+
+            if (WiFiAnalyzerChart.ChartAreas[0].AxisY.Maximum < 100)
+            {
+                WiFiAnalyzerChart.ChartAreas[0].RecalculateAxesScale();
+                WiFiAnalyzerChart.ChartAreas[0].AxisY.Maximum = 100;
+            }
+
+            DateTime filterDate = DateTime.Now;
+
+            if (!captureInfo.LiveCaptureMode && captureInfo.AllFrames.Length > 0)
+            {
+                filterDate = captureInfo.AllFrames[captureInfo.AllFrames.Length - 1].TimeStamp;
+            }
+
+            AnyPacketFrame[] Frames = captureInfo.AllFrames.Where(o => (filterDate - o.TimeStamp).TotalSeconds <= 5).ToArray();
+
+            //Debug.WriteLine("---------------");
+            //go through all the channels
+            for (int i = 1; i < 14; i++)
+            {
+                AnyPacketFrame[] ChannelFrames = Frames.Where(o => o.Wifi_Channel == i).ToArray();
+                int SpeedBit = 0;
+
+                for (int j = 0; j < ChannelFrames.Length; j++)
+                    SpeedBit += ChannelFrames[j].Packet.Bytes.Length;
+
+                SpeedBit *= 8;
+                //Debug.WriteLine("Speed:" + SpeedBit + ", Channel: " + i + ", time: " + (ChannelFrames.Length > 0 ? ChannelFrames[0].TimeStamp.ToString("mm ss") : ""));
+                double Mbit = ((double)SpeedBit / 1024F) / 1024F;
+
+                //TrafficSerie.Points.AddXY(i, Mbit);// SpeedBit);
+                TrafficSerie.Points.AddXY(i, ChannelFrames.Length);// SpeedBit);
+
+                if (ChannelFrames.Length > WiFiAnalyzerChart.ChartAreas[0].AxisY.Maximum)
+                {
+                    WiFiAnalyzerChart.ChartAreas[0].RecalculateAxesScale();
+                    WiFiAnalyzerChart.ChartAreas[0].AxisY.Maximum = ChannelFrames.Length;
+                }
+            }
+
+        }
+
         private void LvRepeaterNames_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (LvRepeaterNames.SelectedItems.Count > 0)
@@ -445,6 +499,7 @@ namespace WiFiSpy
                     this.AirservClient = sessingsForm.client;
                     this.LiveCaptureFile = new CapFile();
                     captureInfo.Clear();
+                    captureInfo.LiveCaptureMode = true;
 
                     this.AirservClient.onPacketArrival += AirservClient_onPacketArrival;
 
@@ -455,17 +510,16 @@ namespace WiFiSpy
         }
 
         Stopwatch sw = Stopwatch.StartNew();
-        private void AirservClient_onPacketArrival(PacketDotNet.Packet packet, DateTime ArrivalTime)
+        private void AirservClient_onPacketArrival(PacketDotNet.Packet packet, DateTime ArrivalTime, int WiFi_Channel)
         {
-            this.LiveCaptureFile.ProcessPacket(packet, ArrivalTime);
+            this.LiveCaptureFile.ProcessPacket(packet, ArrivalTime, WiFi_Channel);
             captureInfo.AddCapturefile(this.LiveCaptureFile);
             this.LiveCaptureFile.Clear();
 
             if (sw.ElapsedMilliseconds >= 1000)
             {
                 this.Invoke(new Invoky(() => RefreshAll()));
-                sw.Reset();
-                sw.Start();
+                sw.Restart();
             }
         }
 

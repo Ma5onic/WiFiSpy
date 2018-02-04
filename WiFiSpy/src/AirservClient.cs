@@ -7,18 +7,20 @@ using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
+using WiFiSpy.src.AirServConnectors;
 
 namespace WiFiSpy.src
 {
     public class AirservClient
     {
-        public const int BUFFER_SIZE = 8192;
         public const int HEADER_SIZE = 5;
-        private byte[] Buffer = new byte[BUFFER_SIZE];
+        private object SendLock = new object();
 
-        public delegate void PacketArrivedCallback(Packet packet, DateTime ArrivalTime);
+        public delegate void PacketArrivedCallback(Packet packet, DateTime ArrivalTime, int Channel);
         public event PacketArrivedCallback onPacketArrival;
-        private Socket client;
+
+        private IAirServConnector AirServConnector;
 
         //receive info
         private ReceiveType ReceiveState = ReceiveType.Header;
@@ -29,6 +31,11 @@ namespace WiFiSpy.src
 
         net_hdr net = new net_hdr();
 
+        Random rnd = new Random();
+
+        int[] ScanChannels = new int[] { 1, 3, 6, 9, 11, 2, 4, 5, 7, 8, 10, 12, 13 };
+        int ChannelHopIndex = 0;
+        
         public enum PacketType
         {
             NET_RC = 1,
@@ -49,114 +56,117 @@ namespace WiFiSpy.src
             Payload
         }
 
-        public AirservClient(string Host, int port)
+        public AirservClient(string Host, int port, string ComPort, bool UseSerial)
         {
-            client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            client.Connect(Host, port);
-
-            client.BeginReceive(Buffer, 0, Buffer.Length, SocketFlags.None, onBeginReceive, null);
-        }
-
-        private void onBeginReceive(IAsyncResult ar)
-        {
-            int BytesTransferred = 0;
-            try
+            if (UseSerial)
             {
-                BytesTransferred = client.EndReceive(ar);
-
-                if (BytesTransferred <= 0)
-                {
-                    Disconnect();
-                    return;
-                }
-            }
-            catch { }
-
-            ReadableDataLen += BytesTransferred;
-
-            bool Process = true;
-
-            while (Process)
-            {
-                if (ReceiveState == ReceiveType.Header)
-                {
-                    Process = ReadableDataLen >= HEADER_SIZE;
-
-                    if (ReadableDataLen >= HEADER_SIZE)
-                    {
-                        net.ReadHeader(Buffer, ReadOffset);
-
-
-                        ReadableDataLen -= HEADER_SIZE;
-                        ReadOffset += HEADER_SIZE;
-                        ReceiveState = ReceiveType.Payload;
-                    }
-                }
-                else if (ReceiveState == ReceiveType.Payload)
-                {
-                    Process = ReadableDataLen >= PayloadLen;
-                    if (ReadableDataLen >= PayloadLen)
-                    {
-                        net.ReadPayload(Buffer, ReadOffset);
-                        //Debug.WriteLine("Command: " + net.nh_type + ", Len: " + net.nh_len + ", " + BitConverter.ToString(net.nh_data, 0, net.nh_data.Length > 100 ? 100 : net.nh_data.Length));
-
-                        Packet packet = PacketDotNet.Packet.ParsePacket(PacketDotNet.LinkLayers.Ieee80211, net.nh_data);
-
-                        if (packet != null)
-                        {
-                            DateTime ArrivalTime = DateTime.Now;
-                            onPacketArrival(packet, ArrivalTime);
-                        }
-
-                        ReadOffset += PayloadLen;
-                        ReadableDataLen -= PayloadLen;
-                        ReceiveState = ReceiveType.Header;
-                    }
-                }
-            }
-
-            int len = ReceiveState == ReceiveType.Header ? HEADER_SIZE : (int)net.nh_len;
-            if (ReadOffset + len >= this.Buffer.Length)
-            {
-                //no more room for this data size, at the end of the buffer ?
-
-                //copy the buffer to the beginning
-                Array.Copy(this.Buffer, ReadOffset, this.Buffer, 0, ReadableDataLen);
-
-                WriteOffset = ReadableDataLen;
-                ReadOffset = 0;
+                AirServConnector = new AirServSerialClient(ComPort);
+                AirServConnector.Connect();
             }
             else
             {
-                //payload fits in the buffer from the current offset
-                //use BytesTransferred to write at the end of the payload
-                //so that the data is not split
-                WriteOffset += BytesTransferred;
+                AirServConnector = new AirServTcpClient(Host, port);
+                AirServConnector.Connect();
             }
 
-            client.BeginReceive(this.Buffer, WriteOffset, Buffer.Length - WriteOffset, SocketFlags.None, onBeginReceive, null);
+            ThreadPool.QueueUserWorkItem(ReceiveThread);
+            ThreadPool.QueueUserWorkItem(ChannelHopThread);
+        }
+
+        Stopwatch ChannelHopSw = Stopwatch.StartNew();
+
+        uint PrevSize = 0;
+
+
+        private void ReceiveThread(object o)
+        {
+            while (true) //fix later
+            {
+                byte[] Header = AirServConnector.Receive(HEADER_SIZE);
+
+                if (Header != null)
+                {
+                    net.ReadHeader(Header, 0);
+
+                    byte[] Payload = AirServConnector.Receive((int)net.nh_len);
+                    net.ReadPayload(Payload, 0);
+
+                    Packet packet = PacketDotNet.Packet.ParsePacket(PacketDotNet.LinkLayers.Ieee80211, net.nh_data);
+
+                    if (packet != null)
+                    {
+                        DateTime ArrivalTime = DateTime.Now;
+                        onPacketArrival(packet, ArrivalTime, net.Channel);
+                    }
+                }
+            }
+        }
+
+        private void ChannelHopThread(object o)
+        {
+            while(true)
+            {
+                Thread.Sleep(250);
+
+                try
+                {
+                    int newChannel = ScanChannels[ChannelHopIndex];
+                    SetChannel(newChannel);
+                    ChannelHopIndex++;
+
+                    if (ChannelHopIndex > ScanChannels.Length - 1)
+                        ChannelHopIndex = 0;
+
+                }
+                catch { }
+            }
+        }
+
+        private void SendPacket(PacketType Command, byte[] data)
+        {
+            lock (SendLock)
+            {
+                byte[] Packet = new net_hdr().WriteData(Command, data);
+                AirServConnector.Send(Packet, 0, Packet.Length);
+            }
+        }
+
+        private void SetChannel(int Channel)
+        {
+            lock (SendLock)
+            {
+                byte[] Packet = new net_hdr().WriteData(PacketType.NET_SET_CHAN, new byte[] { 0, 0, 0, (byte)Channel});
+                AirServConnector.Send(Packet, 0, Packet.Length);
+            }
+
         }
 
         public void Disconnect()
         {
-            if (client != null)
-                client.Close();
-
-            Buffer = null;
+            AirServConnector.Disconnect();
         }
 
         private class net_hdr
         {
             //Thanks to: https://github.com/aircrack-ng/aircrack-ng/blob/master/src/osdep/network.h
+            /*
+             * Type
+             * Packet Length
+             * Payload
+            */
+
             public PacketType nh_type { get; private set; }
             public uint nh_len { get; private set; }
 
             public byte[] PayloadHeader { get; private set; }
             public byte[] nh_data { get; private set; }
 
+            public int Channel { get; private set; }
+
             public net_hdr()
             {
-
+                this.PayloadHeader = new byte[5];
+                this.nh_data = new byte[0];
             }
 
             public void ReadHeader(byte[] Data, int Offset)
@@ -169,11 +179,49 @@ namespace WiFiSpy.src
 
             public void ReadPayload(byte[] Data, int Offset)
             {
-                this.PayloadHeader = new byte[(int)nh_len];
-                Array.Copy(Data, Offset, PayloadHeader, 0, 32);
+                if (nh_type == PacketType.NET_PACKET)// || nh_type == PacketType.NET_RC)
+                {
+                    this.PayloadHeader = new byte[(int)nh_len];
+                    Array.Copy(Data, Offset, PayloadHeader, 0, 32);
 
-                this.nh_data = new byte[(int)nh_len - 32];
-                Array.Copy(Data, Offset + 32, nh_data, 0, nh_data.Length);
+                    this.nh_data = new byte[(int)nh_len - 32];
+                    Array.Copy(Data, Offset + 32, nh_data, 0, nh_data.Length);
+
+                    this.Channel = PayloadHeader[19];
+                }
+                else
+                {
+                    //this.nh_data = new byte[(int)nh_len];
+                    //Array.Copy(Data, Offset, nh_data, 0, nh_len);
+                    
+
+                    /*string derp = "";
+                    for (int i = 0; i < nh_data.Length; i++)
+                    {
+                        if (char.IsLetter((char)nh_data[i]))
+                        {
+                            derp += (char)nh_data[i];
+                        }
+                    }
+                    
+                    Debug.WriteLine(derp);*/
+                }
+            }
+
+            public byte[] WriteData(PacketType Command, byte[] Data)
+            {
+                PayloadHeader[0] = (byte)Command;
+
+                byte[] PacketLength = BitConverter.GetBytes(Data.Length);
+                Array.Reverse(PacketLength, 0, 4); //reverse-endian
+                Array.Copy(PacketLength, 0, PayloadHeader, 1, 4);
+
+                nh_data = Data;
+
+                byte[] data = new byte[PayloadHeader.Length + nh_data.Length];
+                Array.Copy(PayloadHeader, 0, data, 0, PayloadHeader.Length);
+                Array.Copy(nh_data, 0, data, PayloadHeader.Length, nh_data.Length);
+                return data;
             }
         }
     }

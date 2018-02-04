@@ -82,6 +82,9 @@
     </Compile>
     <Compile Include="src\AccessPoint.cs" />
     <Compile Include="src\AirservClient.cs" />
+    <Compile Include="src\AirServConnectors\AirServSerialClient.cs" />
+    <Compile Include="src\AirServConnectors\AirServTcpClient.cs" />
+    <Compile Include="src\AirServConnectors\IAirServConnector.cs" />
     <Compile Include="src\CapFile.cs" />
     <Compile Include="src\CapFileReader.cs" />
     <Compile Include="src\CapManager.cs" />
@@ -91,6 +94,7 @@
     <Compile Include="src\GpsParsers\GpsCsvParser.cs" />
     <Compile Include="src\GpsParsers\GpxParser.cs" />
     <Compile Include="src\OuiParser.cs" />
+    <Compile Include="src\Packets\AnyPacketFrame.cs" />
     <Compile Include="src\Packets\AuthRequestFrame.cs" />
     <Compile Include="src\Packets\DataFrame.cs" />
     <Compile Include="src\Packets\BeaconFrame.cs" />

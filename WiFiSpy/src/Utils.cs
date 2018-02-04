@@ -17,6 +17,9 @@ namespace WiFiSpy.src
 
         public static long MacToLong(byte[] MacAddress)
         {
+            if (MacAddress.Length < 6)
+                return 0;
+
             byte[] MacAddrTemp = new byte[8];
             Array.Copy(MacAddress, MacAddrTemp, 6);
             return BitConverter.ToInt64(MacAddrTemp, 0);

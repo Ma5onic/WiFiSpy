@@ -107,14 +107,24 @@ namespace WiFiSpy.src.Packets
             }
         }
 
+        public int FrameSize { get; private set; }
+        public int Wifi_Channel { get; private set; }
+
         internal DataFrame()
         {
 
         }
 
         public DataFrame(PacketDotNet.Ieee80211.DataDataFrame DataFrame, DateTime TimeStamp)
+            : this(DataFrame, TimeStamp, 0)
+        {
+
+        }
+
+        public DataFrame(PacketDotNet.Ieee80211.DataDataFrame DataFrame, DateTime TimeStamp, int Channel)
         {
             this.TimeStamp = TimeStamp;
+            this.Wifi_Channel = Channel;
 
             this.SourceMacAddress = DataFrame.SourceAddress.GetAddressBytes();
             this.TargetMacAddress = DataFrame.DestinationAddress.GetAddressBytes();
@@ -122,12 +132,21 @@ namespace WiFiSpy.src.Packets
             this.SourceMacAddressLong = Utils.MacToLong(SourceMacAddress);
             this.TargetMacAddressLong = Utils.MacToLong(TargetMacAddress);
 
+            //this.FramePayload = new byte[0];
             this.FramePayload = DataFrame.Bytes;
         }
 
         public DataFrame(PacketDotNet.Ieee80211.QosDataFrame DataFrame, DateTime TimeStamp)
+            : this(DataFrame, TimeStamp, 0)
         {
+
+        }
+
+        public DataFrame(PacketDotNet.Ieee80211.QosDataFrame DataFrame, DateTime TimeStamp, int Channel)
+        {
+            this.Wifi_Channel = Channel;
             this.TimeStamp = TimeStamp;
+            this.FrameSize = DataFrame.FrameSize;
 
             this.SourceMacAddress = DataFrame.SourceAddress.GetAddressBytes();
             this.TargetMacAddress = DataFrame.DestinationAddress.GetAddressBytes();
@@ -213,11 +232,11 @@ namespace WiFiSpy.src.Packets
 
         public override string ToString()
         {
-            if (!isIPv4 && !isTCP && !isUDP)
-                return "";
+            //if (!isIPv4 && !isTCP && !isUDP)
+            //    return "";
 
             string TempPayloadStr = ASCIIEncoding.ASCII.GetString(Payload, 0, Payload.Length > 512 ? 512 : Payload.Length);
-            return "[" + TimeStamp.ToString("dd-MM-yyyy HH:mm:ss") + "][" + SourceIp + "] -> [" + DestIp + "] " + TempPayloadStr;
+            return $"[{TimeStamp.ToString("dd-MM-yyyy HH:mm:ss")}][{SourceIp}] -> [{DestIp}][Len={FramePayload.Length}] {TempPayloadStr}";
         }
 
         public bool Equals(DataFrame x, DataFrame y)

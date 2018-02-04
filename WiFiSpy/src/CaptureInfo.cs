@@ -9,12 +9,14 @@ namespace WiFiSpy.src
 {
     public class CaptureInfo
     {
+        public bool LiveCaptureMode { get; set; }
         private List<BeaconFrame> _beacons;
         private SortedList<long, AccessPoint> _accessPoints;
         private SortedList<string, AccessPoint[]> _APExtenders;
         private SortedList<long, Station> _stations;
         private List<DataFrame> _dataFrames;
         private List<AuthRequestFrame> _authRequestFrames;
+        private List<AnyPacketFrame> _allFrames;
 
         public delegate void DataFrameProgressCallback(int Value, int Max);
         public event DataFrameProgressCallback onDataFrameProgress;
@@ -48,6 +50,13 @@ namespace WiFiSpy.src
                 return _authRequestFrames.ToArray();
             }
         }
+        public AnyPacketFrame[] AllFrames
+        {
+            get
+            {
+                return _allFrames.ToArray();
+            }
+        }
 
 
         /// <summary>
@@ -65,7 +74,7 @@ namespace WiFiSpy.src
         {
             get
             {
-                if (_APExtenders != null)
+                if (_APExtenders != null && !LiveCaptureMode)
                     return _APExtenders;
 
                 SortedList<string, List<AccessPoint>> extenders = new SortedList<string, List<AccessPoint>>();
@@ -104,6 +113,7 @@ namespace WiFiSpy.src
             _stations = new SortedList<long, Station>();
             _dataFrames = new List<DataFrame>();
             _authRequestFrames = new List<AuthRequestFrame>();
+            _allFrames = new List<AnyPacketFrame>();
         }
 
         public void AddCapturefile(CapFile capFile)
@@ -160,6 +170,16 @@ namespace WiFiSpy.src
 
                 _authRequestFrames.Clear();
                 _authRequestFrames.AddRange(authFrames.ToArray());
+
+                if (LiveCaptureMode)
+                {
+                    //merge All Frames - live only
+                    HashSet<AnyPacketFrame> allFrames = new HashSet<AnyPacketFrame>(_allFrames, new AnyPacketFrame());
+                    allFrames.UnionWith(capFile.AllFrames.AsEnumerable());
+
+                    _allFrames.Clear();
+                    _allFrames.AddRange(allFrames.ToArray());
+                }
             }
 
             foreach (Station station in _stations.Values)
@@ -183,7 +203,7 @@ namespace WiFiSpy.src
                     StationList.Add(MacSourceAddrNumber, station);
             }
 
-            Stopwatch sw = Stopwatch.StartNew();
+            /**/Stopwatch sw = Stopwatch.StartNew();
             for (int i = 0; i < _dataFrames.Count; i++)
             {
                 Station station = null;
